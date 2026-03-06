@@ -1,0 +1,62 @@
+.coming-soon {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 60vh;
+  text-align: center;
+  padding: 40px 24px;
+}
+
+.coming-soon-icon {
+  width: 80px;
+  height: 80px;
+  border: 2px solid var(--pg-border-light);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 32px;
+  color: var(--pg-text);
+  transition: border-color 0.3s ease;
+}
+
+.coming-soon-icon:hover {
+  border-color: var(--pg-accent);
+}
+
+.coming-soon h1 {
+  font-size: 36px;
+  font-weight: 800;
+  color: var(--pg-text);
+  letter-spacing: -0.02em;
+  margin-bottom: 16px;
+}
+
+.coming-soon-line {
+  width: 48px;
+  height: 2px;
+  background-color: var(--pg-accent);
+  margin-bottom: 20px;
+}
+
+.coming-soon p {
+  font-size: 14px;
+  color: var(--pg-text-muted);
+  max-width: 400px;
+  line-height: 1.7;
+  margin-bottom: 32px;
+}
+
+.coming-soon-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 12px 28px;
+  border: 1px solid var(--pg-border-light);
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--pg-text);
+}

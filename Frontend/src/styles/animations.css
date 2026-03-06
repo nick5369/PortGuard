@@ -1,0 +1,96 @@
+@keyframes pg-fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes pg-fadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(30px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes pg-slideLeft {
+  from {
+    opacity: 0;
+    transform: translateX(-40px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes pg-slideRight {
+  from {
+    opacity: 0;
+    transform: translateX(40px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes pg-scaleIn {
+  from {
+    opacity: 0;
+    transform: scale(0.92);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes pg-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-6px); }
+}
+
+@keyframes pg-lineGrow {
+  from { transform: scaleX(0); }
+  to { transform: scaleX(1); }
+}
+
+@keyframes pg-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.anim-fadeIn {
+  animation: pg-fadeIn 0.5s ease-out both;
+}
+
+.anim-fadeUp {
+  animation: pg-fadeUp 0.6s ease-out both;
+}
+
+.anim-slideLeft {
+  animation: pg-slideLeft 0.6s ease-out both;
+}
+
+.anim-slideRight {
+  animation: pg-slideRight 0.6s ease-out both;
+}
+
+.anim-scaleIn {
+  animation: pg-scaleIn 0.5s ease-out both;
+}
+
+.anim-float {
+  animation: pg-float 4s ease-in-out infinite;
+}
+
+.anim-lineGrow {
+  animation: pg-lineGrow 0.8s ease-out both;
+  transform-origin: left;
+}
+
+.anim-pulse {
+  animation: pg-pulse 2.5s ease-in-out infinite;
+}

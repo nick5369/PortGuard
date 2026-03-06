@@ -1,0 +1,14 @@
+@import "tailwindcss";
+@import "./styles/reset.css";
+@import "./styles/themes.css";
+@import "./styles/animations.css";
+@import "./styles/layout.css";
+@import "./styles/navbar.css";
+@import "./styles/footer.css";
+@import "./styles/theme-switcher.css";
+@import "./styles/dashboard.css";
+@import "./styles/coming-soon.css";
+@import "./styles/loader.css";
+@import "./styles/trade-intelligence.css";
+@import "./styles/risk-engine.css";
+@import "./styles/port-search.css";

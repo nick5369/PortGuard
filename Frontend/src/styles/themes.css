@@ -1,0 +1,44 @@
+html.theme-light,
+.theme-light {
+  --pg-bg: #ffffff;
+  --pg-bg-alt: #f7f7f7;
+  --pg-text: #000000;
+  --pg-text-muted: #333333;
+  --pg-border: #000000;
+  --pg-border-light: rgba(0, 0, 0, 0.12);
+  --pg-accent: #000000;
+  --pg-accent-inv: #ffffff;
+  --pg-logo-invert: 0;
+  --pg-shadow: rgba(0, 0, 0, 0.08);
+  --pg-overlay: rgba(255, 255, 255, 0.85);
+}
+
+html.theme-dark,
+.theme-dark {
+  --pg-bg: #000000;
+  --pg-bg-alt: #0a0a0a;
+  --pg-text: #ffffff;
+  --pg-text-muted: #cccccc;
+  --pg-border: #ffffff;
+  --pg-border-light: rgba(255, 255, 255, 0.12);
+  --pg-accent: #ffffff;
+  --pg-accent-inv: #000000;
+  --pg-logo-invert: 1;
+  --pg-shadow: rgba(255, 255, 255, 0.05);
+  --pg-overlay: rgba(0, 0, 0, 0.85);
+}
+
+html.theme-manual,
+.theme-manual {
+  --pg-bg: #ffffff;
+  --pg-bg-alt: #f7f7f7;
+  --pg-text: #000000;
+  --pg-text-muted: rgba(0, 0, 0, 0.6);
+  --pg-border: #000000;
+  --pg-border-light: rgba(0, 0, 0, 0.12);
+  --pg-accent: #000000;
+  --pg-accent-inv: #ffffff;
+  --pg-logo-invert: 0;
+  --pg-shadow: rgba(0, 0, 0, 0.08);
+  --pg-overlay: rgba(255, 255, 255, 0.85);
+}
