@@ -2,7 +2,7 @@ import { TableProperties } from "lucide-react";
 
 function riskClass(level) {
   const l = (level || "").toLowerCase();
-  if (l === "high") return "high";
+  if (l === "critical" || l === "high") return "critical";
   if (l === "medium") return "medium";
   return "low";
 }
@@ -12,6 +12,51 @@ function scoreColor(score) {
   if (s >= 70) return "#dc2626";
   if (s >= 40) return "#ea580c";
   return "#16a34a";
+}
+
+const DRIVER_COLORS = ["#6366f1", "#f59e0b", "#06b6d4", "#ec4899", "#8b5cf6", "#14b8a6"];
+
+function ExplanationCell({ text }) {
+  if (!text) return <span style={{ color: "var(--pg-text-muted)" }}>--</span>;
+
+  // Parse "Classified as Low risk (score 25.2). Primary factors: 1. Feature_A, 2. Feature_B, 3. Feature_C."
+  const driverMatch = text.match(
+    /(?:Top drivers|Primary factors|unusual patterns in)[:\s]*(.+?)\.?\s*$/i
+  );
+
+  if (!driverMatch) {
+    return <span>{text}</span>;
+  }
+
+  const mainPart = text.slice(0, driverMatch.index).trim();
+  const driversRaw = driverMatch[1];
+  const drivers = driversRaw
+    .split(/,\s*/)
+    .map((d) => d.replace(/^\d+\.\s*/, "").trim())
+    .filter(Boolean);
+
+  return (
+    <div className="re-explanation-cell">
+      <span className="re-expl-main">{mainPart}</span>
+      {drivers.length > 0 && (
+        <div className="re-expl-drivers">
+          {drivers.map((d, i) => (
+            <span
+              key={i}
+              className="re-driver-chip"
+              style={{
+                backgroundColor: `${DRIVER_COLORS[i % DRIVER_COLORS.length]}18`,
+                color: DRIVER_COLORS[i % DRIVER_COLORS.length],
+                borderColor: `${DRIVER_COLORS[i % DRIVER_COLORS.length]}30`,
+              }}
+            >
+              {d.replace(/_/g, " ")}
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
 
 export default function RiskTable({ inputRows, inputHeaders, results, onRowClick }) {
@@ -79,8 +124,8 @@ export default function RiskTable({ inputRows, inputHeaders, results, onRowClick
                         "--"
                       )}
                     </td>
-                    <td style={{ whiteSpace: "normal", maxWidth: 260, fontSize: 11 }}>
-                      {res.Explanation_Summary || "--"}
+                    <td className="re-expl-td">
+                      <ExplanationCell text={res.Explanation_Summary} />
                     </td>
                   </tr>
                 );

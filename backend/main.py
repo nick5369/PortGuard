@@ -188,15 +188,15 @@ async def trade_intelligence_news(
         search_q = keyword
 
     params = {
-        "q":       search_q,
-        "lang":    "en",
-        "max":     str(limit),
-        "token":   GNEWS_API_KEY,
+        "q":        search_q,
+        "language": "en",           
+        "pageSize": str(limit),    
+        "apiKey":   GNEWS_API_KEY,   
     }
 
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.get("https://gnews.io/api/v4/search", params=params)
+            resp = await client.get("https://newsapi.org/v2/everything", params=params)
     except httpx.TimeoutException:
         raise HTTPException(status_code=504)
     except httpx.RequestError:

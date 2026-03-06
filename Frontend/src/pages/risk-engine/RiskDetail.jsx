@@ -23,7 +23,7 @@ function scoreColor(s) {
 
 function riskClass(level) {
   const l = (level || "").toLowerCase();
-  if (l === "high") return "high";
+  if (l === "critical" || l === "high") return "critical";
   if (l === "medium") return "medium";
   return "low";
 }

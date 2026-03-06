@@ -13,15 +13,36 @@ import RiskTable from "./RiskTable";
 import RiskCharts from "./RiskCharts";
 import RiskDetail from "./RiskDetail";
 
+/* ── RFC-4180 aware CSV line parser (handles quoted commas) ────────────── */
+function parseCSVLine(line) {
+  const result = [];
+  let cur = "";
+  let inQ = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (inQ) {
+      if (ch === '"' && line[i + 1] === '"') { cur += '"'; i++; }
+      else if (ch === '"') inQ = false;
+      else cur += ch;
+    } else {
+      if (ch === '"') inQ = true;
+      else if (ch === ',') { result.push(cur.trim()); cur = ""; }
+      else cur += ch;
+    }
+  }
+  result.push(cur.trim());
+  return result;
+}
+
 function parseCSVResponse(text) {
   const lines = text
     .trim()
     .split(/\r?\n/)
     .filter((l) => l.trim());
   if (lines.length < 2) return [];
-  const headers = lines[0].split(",").map((h) => h.trim());
+  const headers = parseCSVLine(lines[0]);
   return lines.slice(1).map((line) => {
-    const vals = line.split(",").map((v) => v.trim().replace(/^"|"$/g, ""));
+    const vals = parseCSVLine(line);
     const obj = {};
     headers.forEach((h, i) => {
       obj[h] = vals[i] || "";
@@ -53,7 +74,7 @@ export default function RiskEngine() {
 
       let res;
       try {
-        res = await fetch(`${baseUrl}/predict`, {
+        res = await fetch(`${baseUrl}/predict-batch`, {
           method: "POST",
           body: form,
         });
@@ -63,7 +84,7 @@ export default function RiskEngine() {
           title: "Backend Unreachable",
           message:
             "Could not connect to the Risk Engine service. Make sure the backend is running.",
-          hint: `Tried: ${baseUrl}/predict`,
+          hint: `Tried: ${baseUrl}/predict-batch`,
         };
       }
 

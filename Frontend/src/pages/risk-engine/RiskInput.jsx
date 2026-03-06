@@ -12,9 +12,9 @@ import {
 
 const COLUMNS = [
     "Container_ID",
-    "Declaration_Date",
+    "Declaration_Date (YYYY-MM-DD)",
     "Declaration_Time",
-    "Trade_Regime",
+    "Trade_Regime (Import / Export / Transit)",
     "Origin_Country",
     "Destination_Port",
     "Destination_Country",
@@ -122,14 +122,26 @@ export default function RiskInput({ onSubmit, loading }) {
             onSubmit(blob, filled, COLUMNS);
         } else {
             if (!csvData.length) return;
-            let headers;
             let rows;
             if (hasHeader) {
-                headers = csvData[0];
-                rows = csvData.slice(1);
+                // Map uploaded column positions → our expected COLUMNS order,
+                // so extra columns are stripped and reordering is handled.
+                const uploadedHeaders = csvData[0].map((h) => h.trim());
+                const colMap = COLUMNS.map((col) =>
+                    uploadedHeaders.findIndex(
+                        (h) => h.toLowerCase() === col.toLowerCase()
+                    )
+                );
+                rows = csvData.slice(1).map((row) =>
+                    colMap.map((idx) => (idx >= 0 && idx < row.length ? row[idx] : ""))
+                );
             } else {
-                headers = COLUMNS;
-                rows = csvData;
+                // No header: assume values are in COLUMNS order; pad/trim to 15
+                rows = csvData.map((row) => {
+                    const padded = [...row];
+                    while (padded.length < COLUMNS.length) padded.push("");
+                    return padded.slice(0, COLUMNS.length);
+                });
             }
             const blob = buildCSVBlob(COLUMNS, rows);
             onSubmit(blob, rows, COLUMNS);
