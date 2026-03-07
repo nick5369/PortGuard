@@ -1,0 +1,103 @@
+================================================================
+  SmartContainer Risk Engine — Evaluation Report
+  Generated: 2026-03-07 08:42:23
+================================================================
+
+  Train samples : 54000
+  Test  samples : 8481
+
+  Feature columns (13): ['Declaration_DayOfWeek', 'Declaration_Hour', 'Dwell_Time_Deviation', 'Exporter_Risk', 'HS_Risk_Index', 'Importer_Freq_Count', 'Importer_Risk_Index', 'Log_Declared_Value', 'Log_Value_to_Weight_Ratio', 'Origin_Country_Risk', 'Rare_Route_Flag', 'Shipping_Line_Avg_Dwell', 'Weight_Diff_Ratio']
+
+════════════════════════════════════════════════════════════════
+  MODEL CONFIGURATION
+════════════════════════════════════════════════════════════════
+
+  Ensemble weights   : XGBoost 0.5 · LightGBM 0.3 · CatBoost 0.2
+  Critical threshold : P(class=2) > 0.3
+  Medium  threshold  : P(class=1) > 0.4
+
+════════════════════════════════════════════════════════════════
+  TRAIN SET METRICS
+════════════════════════════════════════════════════════════════
+
+  ▸ Macro F1          (PRIMARY)  : 1.0000
+  ▸ Weighted F1                  : 1.0000
+  ▸ F1   — Critical  (class 2)   : 1.0000
+  ▸ Recall — Critical (class 2)  : 1.0000
+  ▸ F1   — Medium    (class 1)   : 1.0000
+  ▸ F1   — Low       (class 0)   : 1.0000
+
+────────────────────────────────────────
+  Confusion Matrix
+────────────────────────────────────────
+                      Low (0)  Medium (1)  Critical (2)
+  Actual \ Predicted                                   
+  Low (0)               42347           0             0
+  Medium (1)                0       11108             0
+  Critical (2)              0           0           545
+
+────────────────────────────────────────
+  Full Classification Report
+────────────────────────────────────────
+                precision    recall  f1-score   support
+  
+       Low (0)     1.0000    1.0000    1.0000     42347
+    Medium (1)     1.0000    1.0000    1.0000     11108
+  Critical (2)     1.0000    1.0000    1.0000       545
+  
+      accuracy                         1.0000     54000
+     macro avg     1.0000    1.0000    1.0000     54000
+  weighted avg     1.0000    1.0000    1.0000     54000
+  
+
+────────────────────────────────────────
+  Prediction Distribution
+────────────────────────────────────────
+  Low (0)             :  42347  (78.4%)
+  Medium (1)          :  11108  (20.6%)
+  Critical (2)        :    545  (1.0%)
+
+════════════════════════════════════════════════════════════════
+  TEST SET METRICS
+════════════════════════════════════════════════════════════════
+
+  ▸ Macro F1          (PRIMARY)  : 0.9999
+  ▸ Weighted F1                  : 0.9999
+  ▸ F1   — Critical  (class 2)   : 1.0000
+  ▸ Recall — Critical (class 2)  : 1.0000
+  ▸ F1   — Medium    (class 1)   : 0.9997
+  ▸ F1   — Low       (class 0)   : 0.9999
+
+────────────────────────────────────────
+  Confusion Matrix
+────────────────────────────────────────
+                      Low (0)  Medium (1)  Critical (2)
+  Actual \ Predicted                                   
+  Low (0)                6645           1             0
+  Medium (1)                0        1762             0
+  Critical (2)              0           0            73
+
+────────────────────────────────────────
+  Full Classification Report
+────────────────────────────────────────
+                precision    recall  f1-score   support
+  
+       Low (0)     1.0000    0.9998    0.9999      6646
+    Medium (1)     0.9994    1.0000    0.9997      1762
+  Critical (2)     1.0000    1.0000    1.0000        73
+  
+      accuracy                         0.9999      8481
+     macro avg     0.9998    0.9999    0.9999      8481
+  weighted avg     0.9999    0.9999    0.9999      8481
+  
+
+────────────────────────────────────────
+  Prediction Distribution
+────────────────────────────────────────
+  Low (0)             :   6645  (78.4%)
+  Medium (1)          :   1763  (20.8%)
+  Critical (2)        :     73  (0.9%)
+
+================================================================
+  End of Report
+================================================================
