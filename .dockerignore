@@ -1,0 +1,13 @@
+venv/
+.git/
+.gitignore
+node_modules/
+Frontend/node_modules/
+Frontend/dist/
+__pycache__/
+*.pyc
+catboost_info/
+debug_outputs/
+.vscode/
+.idea/
+.env
