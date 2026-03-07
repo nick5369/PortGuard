@@ -1,15 +1,3 @@
-"""
-SmartContainer Risk Engine — Big Three Probability Ensemble
-============================================================
-Phase 1: Imbalance Handling              (Cost-Sensitive Weights)
-Phase 2: Hyperparameter Optimization     (Optuna + XGBClassifier)
-Phase 3: Final Ensemble Training & Custom Threshold Inference
-         XGBoost (Optuna best) + LightGBM + CatBoost
-         Anomaly scores computed here for the first time.
-Phase 4: SHAP Explainability & Output Generation
-Evaluation: Stratified CV + Test-set metrics
-"""
-
 import warnings
 warnings.filterwarnings("ignore", category=FutureWarning)
 warnings.filterwarnings("ignore", category=UserWarning)
@@ -36,11 +24,7 @@ from src.config import (
 optuna.logging.set_verbosity(optuna.logging.WARNING)
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-#  PREPARE FEATURES — drop near-zero-variance Trade_ dummies
-# ═══════════════════════════════════════════════════════════════════════════
 def prepare_features(X_train, X_test):
-    """Drop near-zero-variance Trade_ dummy columns before modelling."""
     trade_cols = [c for c in X_train.columns if "Trade_" in c]
     if trade_cols:
         X_train = X_train.drop(columns=trade_cols)
@@ -50,15 +34,7 @@ def prepare_features(X_train, X_test):
     return X_train, X_test
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-#  ANOMALY SCORE HELPER — fit on Xtr, score both Xtr & Xother
-# ═══════════════════════════════════════════════════════════════════════════
 def _inject_anomaly(Xtr, Xother):
-    """
-    Fit IsolationForest on Xtr (which must NOT contain Anomaly_Score).
-    Normalise scores to 0-100 using Xtr min/max.
-    Return copies of both DataFrames with Anomaly_Score appended.
-    """
     iso = IsolationForest(
         contamination=IF_CONTAMINATION, random_state=RANDOM_STATE, n_jobs=-1,
     )
@@ -77,11 +53,7 @@ def _inject_anomaly(Xtr, Xother):
     return Xtr, Xother
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-#  PHASE 1 — IMBALANCE HANDLING (COST-SENSITIVE WEIGHTS)
-# ═══════════════════════════════════════════════════════════════════════════
 def compute_weights(y_train):
-    """Balanced sample weights so the model penalises missing rare classes."""
     weights = compute_sample_weight(class_weight="balanced", y=y_train)
     print(f"[Phase 1] Sample weights — "
           f"min {weights.min():.4f}  max {weights.max():.4f}  "
@@ -89,16 +61,7 @@ def compute_weights(y_train):
     return weights
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-#  PHASE 2 — HYPERPARAMETER OPTIMIZATION (OPTUNA)
-#  X_train here is PURE (no Anomaly_Score column).
-#  Anomaly scores are built fresh inside each CV fold.
-# ═══════════════════════════════════════════════════════════════════════════
 def optimise_hyperparams(X_train, y_train, sample_weights):
-    """
-    20-trial Optuna study maximising macro-F1 via 3-fold stratified CV.
-    IsolationForest is re-fitted per fold to avoid anomaly-score leakage.
-    """
     def objective(trial):
         params = {
             "objective": "multi:softprob",
@@ -126,7 +89,6 @@ def optimise_hyperparams(X_train, y_train, sample_weights):
             ytr, yval = y_train.iloc[train_idx], y_train.iloc[val_idx]
             wtr = sample_weights[train_idx]
 
-            # Anomaly scores built from scratch per fold
             Xtr, Xval = _inject_anomaly(Xtr_raw, Xval_raw)
 
             model = XGBClassifier(**params)
@@ -154,22 +116,7 @@ def optimise_hyperparams(X_train, y_train, sample_weights):
     return best
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-#  PHASE 3 — FINAL TRAINING & CUSTOM THRESHOLD INFERENCE
-#  Anomaly scores are computed HERE for the first and only global time.
-# ═══════════════════════════════════════════════════════════════════════════
 def train_and_predict(X_train, y_train, X_test, sample_weights, best_params):
-    """
-    Big Three Probability Ensemble:
-    1. Fit IsolationForest on the full (pure) X_train → inject Anomaly_Score.
-       The fitted iso + normalisation stats (rmin/rmax) are returned so
-       train_offline.py can save them for consistent production inference.
-    2. Train XGBoost (Optuna best) + LightGBM + CatBoost.
-    3. Average their probabilities → apply custom thresholds.
-    Returns (xgb_model, lgb_model, cat_model, iso, iso_rmin, iso_rmax,
-             X_train, X_test, proba, predictions, risk_scores).
-    """
-    # ── Anomaly injection (iso exposed so caller can persist it) ───────────
     iso = IsolationForest(
         contamination=IF_CONTAMINATION, random_state=RANDOM_STATE, n_jobs=-1,
     )
@@ -186,7 +133,6 @@ def train_and_predict(X_train, y_train, X_test, sample_weights, best_params):
           f"train mean {X_train['Anomaly_Score'].mean():.2f}, "
           f"test mean {X_test['Anomaly_Score'].mean():.2f}")
 
-    # ── 1. XGBoost (Optuna-tuned) ────────────────────────────────────────
     xgb_model = XGBClassifier(
         objective="multi:softprob",
         num_class=3,
@@ -200,7 +146,6 @@ def train_and_predict(X_train, y_train, X_test, sample_weights, best_params):
     xgb_model.fit(X_train, y_train, sample_weight=sample_weights, verbose=False)
     print(f"[Phase 3] XGBoost trained on {X_train.shape}")
 
-    # ── 2. LightGBM ──────────────────────────────────────────────────────
     lgb_model = LGBMClassifier(
         n_estimators=800,
         num_class=3,
@@ -211,7 +156,6 @@ def train_and_predict(X_train, y_train, X_test, sample_weights, best_params):
     lgb_model.fit(X_train, y_train)
     print(f"[Phase 3] LightGBM trained")
 
-    # ── 3. CatBoost ──────────────────────────────────────────────────────
     cat_model = CatBoostClassifier(
         iterations=800,
         auto_class_weights="Balanced",
@@ -221,14 +165,12 @@ def train_and_predict(X_train, y_train, X_test, sample_weights, best_params):
     cat_model.fit(X_train, y_train)
     print(f"[Phase 3] CatBoost trained")
 
-    # ── Ensemble probabilities (simple average) ──────────────────────────
     xgb_proba = xgb_model.predict_proba(X_test)
     lgb_proba = lgb_model.predict_proba(X_test)
     cat_proba = cat_model.predict_proba(X_test)
     proba = (0.5*xgb_proba) + (0.3*lgb_proba) + (0.2*cat_proba)
     print(f"[Phase 3] Ensemble probabilities blended (XGB + LGB + CAT)")
 
-    # ── Custom threshold logic ────────────────────────────────────────────
     predictions = np.zeros(len(X_test), dtype=int)
 
     critical_mask = proba[:, 2] > CRITICAL_THRESHOLD
@@ -236,12 +178,7 @@ def train_and_predict(X_train, y_train, X_test, sample_weights, best_params):
 
     predictions[critical_mask] = 2
     predictions[medium_mask] = 1
-    # remaining stay 0
 
-    # ── Continuous Risk Score (0-100) with rank-based spread per tier ──
-    #   Low: 0-33  |  Medium: 34-66  |  Critical: 67-100
-    # Rank (percentile) scaling within each tier guarantees uniform
-    # spread even when the model's probabilities are highly confident.
     raw_score = (proba[:, 1] * 50) + (proba[:, 2] * 100)
     TIERS = {0: (0.0, 33.0), 1: (34.0, 66.0), 2: (67.0, 100.0)}
     risk_scores = np.empty(len(predictions), dtype=float)
@@ -254,8 +191,7 @@ def train_and_predict(X_train, y_train, X_test, sample_weights, best_params):
         if n == 1:
             risk_scores[mask] = (lo + hi) / 2
         else:
-            # Rank-based: sort order → evenly spaced percentiles
-            ranks = vals.argsort().argsort()   # 0 .. n-1
+            ranks = vals.argsort().argsort()
             risk_scores[mask] = lo + ranks / (n - 1) * (hi - lo)
 
     print(f"[Phase 3] Predictions — "
@@ -263,8 +199,6 @@ def train_and_predict(X_train, y_train, X_test, sample_weights, best_params):
           f"Medium: {(predictions==1).sum()}, "
           f"Critical: {(predictions==2).sum()}")
 
-    # Return all 3 models + iso detector for offline saving.
-    # xgb_model is the one passed to SHAP (TreeExplainer, single tree model).
     return (
         xgb_model, lgb_model, cat_model,
         iso, iso_rmin, iso_rmax,
@@ -272,44 +206,28 @@ def train_and_predict(X_train, y_train, X_test, sample_weights, best_params):
     )
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-#  INFERENCE HELPER — apply saved models to new data (FastAPI endpoint)
-# ═══════════════════════════════════════════════════════════════════════════
 def inference_predict(
     xgb_model, lgb_model, cat_model,
     iso, iso_rmin, iso_rmax,
     X_test_pure,
 ):
-    """
-    Production inference path (no re-fitting, no training data required).
-    Applies the training-time IsolationForest using saved min/max stats so
-    Anomaly_Score is consistent with what the models saw during training.
-
-    Returns (X_test_enriched, proba, predictions, risk_scores).
-    X_test_enriched is a copy with Anomaly_Score appended — pass it directly
-    to explain_and_save().
-    """
     X_test = X_test_pure.copy().reset_index(drop=True)
 
-    # ── Anomaly score: saved training-time normalisation ──────────────────
     raw   = -iso.decision_function(X_test)
     denom = iso_rmax - iso_rmin if iso_rmax != iso_rmin else 1.0
     X_test["Anomaly_Score"] = np.clip((raw - iso_rmin) / denom * 100, 0, 100)
 
-    # ── Weighted ensemble (0.5 XGB + 0.3 LGB + 0.2 CAT) ─────────────────
     xgb_proba = xgb_model.predict_proba(X_test)
     lgb_proba = lgb_model.predict_proba(X_test)
     cat_proba = cat_model.predict_proba(X_test)
     proba = (0.5 * xgb_proba) + (0.3 * lgb_proba) + (0.2 * cat_proba)
 
-    # ── Custom threshold classification ───────────────────────────────────
     predictions   = np.zeros(len(X_test), dtype=int)
     critical_mask = proba[:, 2] > CRITICAL_THRESHOLD
     medium_mask   = (~critical_mask) & (proba[:, 1] > MEDIUM_THRESHOLD)
     predictions[critical_mask] = 2
     predictions[medium_mask]   = 1
 
-    # ── Rank-based risk score (0-100, spread within each tier) ───────────
     raw_score = (proba[:, 1] * 50) + (proba[:, 2] * 100)
     TIERS = {0: (0.0, 33.0), 1: (34.0, 66.0), 2: (67.0, 100.0)}
     risk_scores = np.empty(len(predictions), dtype=float)
@@ -322,23 +240,16 @@ def inference_predict(
         if n == 1:
             risk_scores[mask] = (lo + hi) / 2
         else:
-            ranks = vals.argsort().argsort()   # 0 .. n-1
+            ranks = vals.argsort().argsort()
             risk_scores[mask] = lo + ranks / (n - 1) * (hi - lo)
 
     return X_test, proba, predictions, risk_scores
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-#  PHASE 4 — SHAP EXPLAINABILITY & OUTPUT
-# ═══════════════════════════════════════════════════════════════════════════
 def explain_and_save(model, X_test, test_ids, predictions, risk_scores):
-    """SHAP TreeExplainer → top 3 features per row → plain English explanation."""
     explainer = shap.TreeExplainer(model)
     shap_values = explainer.shap_values(X_test)
 
-    # Handle both SHAP formats:
-    #   Old: list of 3 arrays, each (n_samples, n_features)
-    #   New: single 3D array (n_samples, n_features, n_classes)
     if isinstance(shap_values, list):
         def get_row_shap(sample_idx, class_idx):
             return shap_values[class_idx][sample_idx]
@@ -350,7 +261,6 @@ def explain_and_save(model, X_test, test_ids, predictions, risk_scores):
     n_features = len(feature_names)
     n = len(X_test)
 
-    # Guarantee we never request more indices than features available
     top_k = min(3, n_features)
 
     explanations = []
@@ -358,11 +268,9 @@ def explain_and_save(model, X_test, test_ids, predictions, risk_scores):
         pred_class = predictions[i]
         row_shap = get_row_shap(i, pred_class)
 
-        # Indices of the top-k features sorted by descending SHAP value
         top_indices = np.argsort(row_shap)[-top_k:][::-1]
         top_feats = [feature_names[idx] for idx in top_indices]
 
-        # Build a numbered list: "1. Feature_A, 2. Feature_B, 3. Feature_C"
         feat_str = ", ".join(
             f"{rank}. {name}" for rank, name in enumerate(top_feats, 1)
         )
@@ -401,14 +309,7 @@ def explain_and_save(model, X_test, test_ids, predictions, risk_scores):
     return output
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-#  EVALUATION — Stratified CV on PURE train (zero leakage)
-# ═══════════════════════════════════════════════════════════════════════════
 def evaluate_on_train_cv(X_train_pure, y_train, sample_weights, best_params):
-    """
-    3-fold stratified CV on the PURE X_train (no Anomaly_Score column).
-    IsolationForest is re-fitted per fold → zero anomaly leakage.
-    """
     skf = StratifiedKFold(
         n_splits=CV_FOLDS, shuffle=True, random_state=RANDOM_STATE
     )
@@ -422,7 +323,6 @@ def evaluate_on_train_cv(X_train_pure, y_train, sample_weights, best_params):
         ytr = y_train.iloc[tr_idx]
         wtr = sample_weights[tr_idx]
 
-        # Anomaly scores built from scratch per fold
         Xtr, Xval = _inject_anomaly(Xtr_raw, Xval_raw)
 
         fold_model = XGBClassifier(
@@ -445,7 +345,6 @@ def evaluate_on_train_cv(X_train_pure, y_train, sample_weights, best_params):
 
 
 def evaluate_on_test(predictions, y_test_true):
-    """Evaluate final Phase 3 predictions against actual test labels."""
     _print_metrics(
         "TEST SET EVALUATION  (Unseen Data · Ground Truth from CSV)",
         y_test_true, predictions,
@@ -453,7 +352,6 @@ def evaluate_on_test(predictions, y_test_true):
 
 
 def _print_metrics(title, y_true, y_pred):
-    """Shared metric printer."""
     target_names = ["Low (0)", "Medium (1)", "Critical (2)"]
 
     macro_f1    = f1_score(y_true, y_pred, average="macro")
