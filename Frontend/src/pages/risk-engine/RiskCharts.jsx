@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo, memo } from "react";
 import {
   BarChart3,
   PieChart as PieIcon,
@@ -31,28 +31,54 @@ import {
   Line,
 } from "recharts";
 
-/* ── Hardcoded vivid palette (never theme-bound) ────────────────────────── */
+/* ── Professional analytics palette ─────────────────────────────────────── */
 const C = {
-  green: "#16a34a",
-  orange: "#ea580c",
-  red: "#dc2626",
-  indigo: "#6366f1",
-  amber: "#f59e0b",
-  cyan: "#06b6d4",
-  pink: "#ec4899",
-  violet: "#8b5cf6",
-  teal: "#14b8a6",
-  rose: "#f43f5e",
-  sky: "#0ea5e9",
-  lime: "#84cc16",
-  fuchsia: "#d946ef",
-  emerald: "#10b981",
+  // Risk signal colors — desaturated, refined
+  green:   "#22c55e",   // safe / low risk
+  orange:  "#f97316",   // medium risk
+  red:     "#ef4444",   // critical / high risk
+
+  // Primary accent — deep blue-indigo
+  indigo:  "#6366f1",
+
+  // Supporting data colors — muted & professional
+  amber:   "#eab308",
+  cyan:    "#22d3ee",
+  pink:    "#f472b6",
+  violet:  "#a78bfa",
+  teal:    "#2dd4bf",
+  rose:    "#fb7185",
+  sky:     "#38bdf8",
+  lime:    "#a3e635",
+  fuchsia: "#c084fc",
+  emerald: "#34d399",
+  slate:   "#94a3b8",
+  blue:    "#60a5fa",
 };
 
+/* ── Multi-series palette — ordered for max contrast between adjacent bars ── */
 const MULTI = [
-  C.indigo, C.amber, C.cyan, C.pink, C.violet, C.teal,
-  C.rose, C.sky, C.lime, C.fuchsia, C.emerald, C.orange, C.green, C.red,
+  "#6366f1",  // indigo
+  "#22d3ee",  // cyan
+  "#a78bfa",  // violet
+  "#38bdf8",  // sky
+  "#2dd4bf",  // teal
+  "#f472b6",  // pink
+  "#60a5fa",  // blue
+  "#34d399",  // emerald
+  "#eab308",  // amber
+  "#c084fc",  // fuchsia
+  "#fb7185",  // rose
+  "#a3e635",  // lime
+  "#f97316",  // orange
+  "#94a3b8",  // slate
 ];
+
+/* ── Grid & axis style constants ─────────────────────────────────────────── */
+const GRID_COLOR  = "rgba(148,163,184,0.12)";   // very subtle slate grid
+const AXIS_STYLE  = { fontSize: 10, fill: "#94a3b8" };
+const AXIS_STYLE9 = { fontSize: 9,  fill: "#94a3b8" };
+const AXIS_STYLE11= { fontSize: 11, fill: "#94a3b8" };
 
 function scoreColor(s) {
   if (s >= 70) return C.red;
@@ -65,6 +91,29 @@ function riskColor(level) {
   if (l === "critical" || l === "high") return C.red;
   if (l === "medium") return C.orange;
   return C.green;
+}
+
+/* ── Performance limits ────────────────────────────────────────────────── */
+const MAX_BARS = 150;    // cap per-container bar chart entries
+const MAX_SCATTER = 300; // cap scatter plot points
+
+// Returns top-N entries sorted by risk score descending (highest risk first)
+function topByScore(arr, max, scoreKey = "score") {
+  if (arr.length <= max) return arr;
+  return [...arr].sort((a, b) => b[scoreKey] - a[scoreKey]).slice(0, max);
+}
+
+// For scatter: keep ALL high-risk points + sample the rest to fill up to max
+function topScatter(arr, max, scoreKey = "score") {
+  if (arr.length <= max) return arr;
+  const high = arr.filter((d) => d[scoreKey] >= 70);
+  const rest = arr.filter((d) => d[scoreKey] < 70);
+  const remaining = Math.max(0, max - high.length);
+  const step = rest.length / remaining;
+  const sampledRest = remaining > 0
+    ? Array.from({ length: remaining }, (_, i) => rest[Math.floor(i * step)])
+    : [];
+  return [...high, ...sampledRest];
 }
 
 /* ── COLUMN INDEXES in inputRows ────────────────────────────────────────── */
@@ -250,8 +299,8 @@ const TABS = [
   { id: "deep", label: "Deep Dive", icon: Layers },
 ];
 
-/* ── Custom Tooltip ─────────────────────────────────────────────────────── */
-function CustomTooltip({ active, payload, label }) {
+/* ── Custom Tooltip (memoized to avoid re-creation on every render) ────── */
+const CustomTooltip = memo(function CustomTooltip({ active, payload, label }) {
   if (!active || !payload?.length) return null;
   return (
     <div className="re-custom-tooltip">
@@ -265,7 +314,7 @@ function CustomTooltip({ active, payload, label }) {
       ))}
     </div>
   );
-}
+});
 
 /* ══════════════════════════════════════════════════════════════════════════
    MAIN COMPONENT
@@ -275,34 +324,74 @@ export default function RiskCharts({ results, inputRows }) {
 
   if (!results || !results.length) return null;
 
-  /* pre-compute all data */
-  const pieData = buildPieData(results);
-  const distData = buildDistribution(results);
-  const barData = buildBarData(results);
-  const top10 = buildTop10(results);
-  const scatterData = buildScatter(results, inputRows);
-  const weightDiscrep = buildWeightDiscrepancy(results, inputRows);
-  const dwellVsRisk = buildDwellVsRisk(results, inputRows);
-  const valueVsRisk = buildValueVsRisk(results, inputRows);
-  const byOrigin = buildGroupedAvg(results, inputRows, IDX.ORIGIN);
-  const byPort = buildGroupedAvg(results, inputRows, IDX.DEST_PORT);
-  const byRegime = buildGroupedAvg(results, inputRows, IDX.TRADE_REGIME);
-  const byShipping = buildGroupedAvg(results, inputRows, IDX.SHIPPING);
-  const byCountry = buildGroupedAvg(results, inputRows, IDX.DEST_COUNTRY);
-  const hsData = buildHsCategory(results, inputRows);
-  const radarData = buildRiskRadar(results);
-  const dwellBuckets = buildDwellBuckets(results, inputRows);
+  /* ── Summary stats (always needed, cheap) ───────────────────────────── */
+  const { avgScore, maxScore, minScore, lowCount, medCount, critCount } = useMemo(() => {
+    const scores = results.map((r) => Number(r.Risk_Score) || 0);
+    const sum = scores.reduce((a, b) => a + b, 0);
+    return {
+      avgScore: (sum / scores.length).toFixed(1),
+      maxScore: Math.max(...scores).toFixed(1),
+      minScore: Math.min(...scores).toFixed(1),
+      lowCount: results.filter((r) => (r.Risk_Level || "").toLowerCase() === "low").length,
+      medCount: results.filter((r) => (r.Risk_Level || "").toLowerCase() === "medium").length,
+      critCount: results.filter((r) => { const l = (r.Risk_Level || "").toLowerCase(); return l === "critical" || l === "high"; }).length,
+    };
+  }, [results]);
 
-  const scores = results.map((r) => Number(r.Risk_Score) || 0);
-  const avgScore = (scores.reduce((a, b) => a + b, 0) / scores.length).toFixed(1);
-  const maxScore = Math.max(...scores).toFixed(1);
-  const minScore = Math.min(...scores).toFixed(1);
-  const lowCount = results.filter((r) => (r.Risk_Level || "").toLowerCase() === "low").length;
-  const medCount = results.filter((r) => (r.Risk_Level || "").toLowerCase() === "medium").length;
-  const critCount = results.filter((r) => {
-    const l = (r.Risk_Level || "").toLowerCase();
-    return l === "critical" || l === "high";
-  }).length;
+  /* ── Overview tab data ───────────────────────────────────────────────── */
+  const overviewData = useMemo(() => ({
+    pieData: buildPieData(results),
+    distData: buildDistribution(results),
+    radarData: buildRiskRadar(results),
+  }), [results]);
+
+  /* ── Containers tab data (top MAX_BARS by risk score) ──────────────────── */
+  const containersData = useMemo(() => {
+    const barData = topByScore(buildBarData(results), MAX_BARS);
+    const top10 = buildTop10(results);
+    const dwellBuckets = buildDwellBuckets(results, inputRows);
+    return { barData, top10, dwellBuckets };
+  }, [results, inputRows]);
+
+  /* ── Geography tab data ──────────────────────────────────────────────── */
+  const geoData = useMemo(() => ({
+    byOrigin: buildGroupedAvg(results, inputRows, IDX.ORIGIN),
+    byPort: buildGroupedAvg(results, inputRows, IDX.DEST_PORT),
+    byRegime: buildGroupedAvg(results, inputRows, IDX.TRADE_REGIME),
+    byShipping: buildGroupedAvg(results, inputRows, IDX.SHIPPING),
+    byCountry: buildGroupedAvg(results, inputRows, IDX.DEST_COUNTRY),
+  }), [results, inputRows]);
+
+  /* ── Weight & Value tab data (high-risk preserved) ─────────────────── */
+  const weightData = useMemo(() => {
+    // Weight discrepancy: worst anomalies first
+    const allDiscrep = buildWeightDiscrepancy(results, inputRows);
+    const weightDiscrep = allDiscrep.length > MAX_BARS
+      ? [...allDiscrep].sort((a, b) => Math.abs(b.pct) - Math.abs(a.pct)).slice(0, MAX_BARS)
+      : allDiscrep;
+    const scatterData = topScatter(buildScatter(results, inputRows), MAX_SCATTER);
+    const dwellVsRisk = topScatter(buildDwellVsRisk(results, inputRows), MAX_SCATTER);
+    return { weightDiscrep, scatterData, dwellVsRisk };
+  }, [results, inputRows]);
+
+  /* ── Deep Dive tab data (high-risk preserved) ────────────────────────── */
+  const deepData = useMemo(() => {
+    const valueVsRisk = topScatter(buildValueVsRisk(results, inputRows), MAX_SCATTER);
+    const hsData = buildHsCategory(results, inputRows);
+    // Composed chart: top by risk score so most dangerous containers visible
+    const allComposed = results.map((r, i) => ({
+      id: String(r.Container_ID).slice(-6),
+      score: Number(r.Risk_Score) || 0,
+      dwell: Number((inputRows[i] || [])[IDX.DWELL]) || 0,
+    }));
+    const composedData = topByScore(allComposed, MAX_BARS);
+    // Weight discrepancy %: worst anomalies first
+    const allDiscrep2 = buildWeightDiscrepancy(results, inputRows);
+    const weightDiscrep = allDiscrep2.length > MAX_BARS
+      ? [...allDiscrep2].sort((a, b) => Math.abs(b.pct) - Math.abs(a.pct)).slice(0, MAX_BARS)
+      : allDiscrep2;
+    return { valueVsRisk, hsData, composedData, weightDiscrep };
+  }, [results, inputRows]);
 
   return (
     <div className="re-section anim-fadeUp">
@@ -348,8 +437,8 @@ export default function RiskCharts({ results, inputRows }) {
                   <div className="re-chart-title">Risk Level Distribution</div>
                   <ResponsiveContainer width="100%" height={260}>
                     <PieChart>
-                      <Pie data={pieData} cx="50%" cy="50%" innerRadius={55} outerRadius={95} paddingAngle={4} dataKey="value" label={({name,value})=>`${name}: ${value}`}>
-                        {pieData.map((entry,i)=>(<Cell key={i} fill={entry.name==="Low"?C.green:entry.name==="Medium"?C.orange:C.red}/>))}
+                      <Pie data={overviewData.pieData} cx="50%" cy="50%" innerRadius={55} outerRadius={95} paddingAngle={4} dataKey="value" label={({name,value})=>`${name}: ${value}`} isAnimationActive={false}>
+                        {overviewData.pieData.map((entry,i)=>(<Cell key={i} fill={entry.name==="Low"?C.green:entry.name==="Medium"?C.orange:C.red}/>))}
                       </Pie>
                       <Tooltip content={<CustomTooltip/>}/><Legend/>
                     </PieChart>
@@ -358,23 +447,23 @@ export default function RiskCharts({ results, inputRows }) {
                 <div className="re-chart-card">
                   <div className="re-chart-title">Score Distribution</div>
                   <ResponsiveContainer width="100%" height={260}>
-                    <AreaChart data={distData}>
-                      <defs><linearGradient id="areaGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={C.indigo} stopOpacity={0.4}/><stop offset="100%" stopColor={C.indigo} stopOpacity={0.02}/></linearGradient></defs>
-                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(150,150,150,0.15)"/>
-                      <XAxis dataKey="range" tick={{fontSize:10}}/><YAxis allowDecimals={false} tick={{fontSize:10}}/>
+                    <AreaChart data={overviewData.distData}>
+                      <defs><linearGradient id="areaGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={C.indigo} stopOpacity={0.35}/><stop offset="100%" stopColor={C.indigo} stopOpacity={0.0}/></linearGradient></defs>
+                      <CartesianGrid strokeDasharray="3 3" stroke={GRID_COLOR}/>
+                      <XAxis dataKey="range" tick={AXIS_STYLE}/><YAxis allowDecimals={false} tick={AXIS_STYLE}/>
                       <Tooltip content={<CustomTooltip/>}/>
-                      <Area type="monotone" dataKey="count" stroke={C.indigo} fill="url(#areaGrad)" strokeWidth={2.5}/>
+                      <Area type="monotone" dataKey="count" stroke={C.indigo} fill="url(#areaGrad)" strokeWidth={2.5} isAnimationActive={false}/>
                     </AreaChart>
                   </ResponsiveContainer>
                 </div>
                 <div className="re-chart-card full">
                   <div className="re-chart-title">Risk Score Statistics</div>
                   <ResponsiveContainer width="100%" height={300}>
-                    <RadarChart data={radarData}>
-                      <PolarGrid stroke="rgba(150,150,150,0.2)"/>
-                      <PolarAngleAxis dataKey="metric" tick={{fontSize:11,fill:"#888"}}/>
-                      <PolarRadiusAxis tick={{fontSize:9}} domain={[0,100]}/>
-                      <Radar name="Score Stats" dataKey="value" stroke={C.violet} fill={`${C.violet}30`} strokeWidth={2}/>
+                    <RadarChart data={overviewData.radarData}>
+                      <PolarGrid stroke={GRID_COLOR}/>
+                      <PolarAngleAxis dataKey="metric" tick={{fontSize:11,fill:C.slate}}/>
+                      <PolarRadiusAxis tick={{fontSize:9,fill:C.slate}} domain={[0,100]}/>
+                      <Radar name="Score Stats" dataKey="value" stroke={C.indigo} fill={`${C.indigo}25`} strokeWidth={2}/>
                       <Tooltip content={<CustomTooltip/>}/><Legend/>
                     </RadarChart>
                   </ResponsiveContainer>
@@ -387,39 +476,39 @@ export default function RiskCharts({ results, inputRows }) {
           {activeTab === "containers" && (
             <div className="re-charts-grid">
               <div className="re-chart-card full">
-                <div className="re-chart-title">Risk Score per Container</div>
+                <div className="re-chart-title">Risk Score per Container {results.length > MAX_BARS && <span style={{fontSize:11,opacity:0.6}}>(Top {MAX_BARS} highest risk of {results.length})</span>}</div>
                 <ResponsiveContainer width="100%" height={300}>
-                  <BarChart data={barData}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(150,150,150,0.15)"/>
-                    <XAxis dataKey="id" tick={{fontSize:9}} interval={0} angle={-40} textAnchor="end" height={55}/>
-                    <YAxis domain={[0,100]} tick={{fontSize:10}}/>
+                  <BarChart data={containersData.barData}>
+                    <CartesianGrid strokeDasharray="3 3" stroke={GRID_COLOR}/>
+                    <XAxis dataKey="id" tick={AXIS_STYLE9} interval={0} angle={-40} textAnchor="end" height={55}/>
+                    <YAxis domain={[0,100]} tick={AXIS_STYLE}/>
                     <Tooltip content={<CustomTooltip/>}/>
-                    <Bar dataKey="score" radius={[4,4,0,0]} name="Score">{barData.map((d,i)=>(<Cell key={i} fill={d.fill}/>))}</Bar>
+                    <Bar dataKey="score" radius={[4,4,0,0]} name="Score" isAnimationActive={false}>{containersData.barData.map((d,i)=>(<Cell key={i} fill={d.fill}/>))}</Bar>
                   </BarChart>
                 </ResponsiveContainer>
               </div>
               <div className="re-chart-card full">
                 <div className="re-chart-title">Top 10 Riskiest Containers</div>
                 <ResponsiveContainer width="100%" height={320}>
-                  <BarChart data={top10} layout="vertical">
-                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(150,150,150,0.15)"/>
-                    <XAxis type="number" domain={[0,100]} tick={{fontSize:10}}/>
-                    <YAxis type="category" dataKey="id" tick={{fontSize:10}} width={60}/>
+                  <BarChart data={containersData.top10} layout="vertical">
+                    <CartesianGrid strokeDasharray="3 3" stroke={GRID_COLOR}/>
+                    <XAxis type="number" domain={[0,100]} tick={AXIS_STYLE}/>
+                    <YAxis type="category" dataKey="id" tick={AXIS_STYLE} width={60}/>
                     <Tooltip content={<CustomTooltip/>}/>
-                    <Bar dataKey="score" radius={[0,4,4,0]} name="Score">{top10.map((d,i)=>(<Cell key={i} fill={riskColor(d.level)}/>))}</Bar>
+                    <Bar dataKey="score" radius={[0,4,4,0]} name="Score" isAnimationActive={false}>{containersData.top10.map((d,i)=>(<Cell key={i} fill={riskColor(d.level)}/>))}</Bar>
                   </BarChart>
                 </ResponsiveContainer>
               </div>
               <div className="re-chart-card full">
                 <div className="re-chart-title">Risk Levels by Dwell Time Range</div>
                 <ResponsiveContainer width="100%" height={280}>
-                  <BarChart data={dwellBuckets}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(150,150,150,0.15)"/>
-                    <XAxis dataKey="range" tick={{fontSize:10}}/><YAxis allowDecimals={false} tick={{fontSize:10}}/>
+                  <BarChart data={containersData.dwellBuckets}>
+                    <CartesianGrid strokeDasharray="3 3" stroke={GRID_COLOR}/>
+                    <XAxis dataKey="range" tick={AXIS_STYLE}/><YAxis allowDecimals={false} tick={AXIS_STYLE}/>
                     <Tooltip content={<CustomTooltip/>}/><Legend/>
-                    <Bar dataKey="low" stackId="a" fill={C.green} name="Low"/>
-                    <Bar dataKey="med" stackId="a" fill={C.orange} name="Medium"/>
-                    <Bar dataKey="crit" stackId="a" fill={C.red} name="Critical" radius={[4,4,0,0]}/>
+                    <Bar dataKey="low" stackId="a" fill={C.green} name="Low" isAnimationActive={false}/>
+                    <Bar dataKey="med" stackId="a" fill={C.orange} name="Medium" isAnimationActive={false}/>
+                    <Bar dataKey="crit" stackId="a" fill={C.red} name="Critical" radius={[4,4,0,0]} isAnimationActive={false}/>
                   </BarChart>
                 </ResponsiveContainer>
               </div>
@@ -432,63 +521,63 @@ export default function RiskCharts({ results, inputRows }) {
               <div className="re-chart-card">
                 <div className="re-chart-title">Avg Score by Origin Country</div>
                 <ResponsiveContainer width="100%" height={280}>
-                  <BarChart data={byOrigin.slice(0,12)} layout="vertical">
-                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(150,150,150,0.15)"/>
-                    <XAxis type="number" domain={[0,100]} tick={{fontSize:10}}/>
-                    <YAxis type="category" dataKey="name" tick={{fontSize:10}} width={50}/>
+                  <BarChart data={geoData.byOrigin.slice(0,12)} layout="vertical">
+                    <CartesianGrid strokeDasharray="3 3" stroke={GRID_COLOR}/>
+                    <XAxis type="number" domain={[0,100]} tick={AXIS_STYLE}/>
+                    <YAxis type="category" dataKey="name" tick={AXIS_STYLE} width={50}/>
                     <Tooltip content={<CustomTooltip/>}/>
-                    <Bar dataKey="avg" radius={[0,4,4,0]} name="Avg Score">{byOrigin.slice(0,12).map((d,i)=>(<Cell key={i} fill={MULTI[i%MULTI.length]}/>))}</Bar>
+                    <Bar dataKey="avg" radius={[0,4,4,0]} name="Avg Score" isAnimationActive={false}>{geoData.byOrigin.slice(0,12).map((d,i)=>(<Cell key={i} fill={MULTI[i%MULTI.length]}/>))}</Bar>
                   </BarChart>
                 </ResponsiveContainer>
               </div>
               <div className="re-chart-card">
                 <div className="re-chart-title">Avg Score by Destination Port</div>
                 <ResponsiveContainer width="100%" height={280}>
-                  <BarChart data={byPort.slice(0,12)} layout="vertical">
-                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(150,150,150,0.15)"/>
-                    <XAxis type="number" domain={[0,100]} tick={{fontSize:10}}/>
-                    <YAxis type="category" dataKey="name" tick={{fontSize:10}} width={70}/>
+                  <BarChart data={geoData.byPort.slice(0,12)} layout="vertical">
+                    <CartesianGrid strokeDasharray="3 3" stroke={GRID_COLOR}/>
+                    <XAxis type="number" domain={[0,100]} tick={AXIS_STYLE}/>
+                    <YAxis type="category" dataKey="name" tick={AXIS_STYLE} width={70}/>
                     <Tooltip content={<CustomTooltip/>}/>
-                    <Bar dataKey="avg" radius={[0,4,4,0]} name="Avg Score">{byPort.slice(0,12).map((d,i)=>(<Cell key={i} fill={MULTI[(i+3)%MULTI.length]}/>))}</Bar>
+                    <Bar dataKey="avg" radius={[0,4,4,0]} name="Avg Score" isAnimationActive={false}>{geoData.byPort.slice(0,12).map((d,i)=>(<Cell key={i} fill={MULTI[(i+3)%MULTI.length]}/>))}</Bar>
                   </BarChart>
                 </ResponsiveContainer>
               </div>
               <div className="re-chart-card">
                 <div className="re-chart-title">Risk Breakdown by Trade Regime</div>
                 <ResponsiveContainer width="100%" height={280}>
-                  <BarChart data={byRegime}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(150,150,150,0.15)"/>
-                    <XAxis dataKey="name" tick={{fontSize:11}}/><YAxis allowDecimals={false} tick={{fontSize:10}}/>
+                  <BarChart data={geoData.byRegime}>
+                    <CartesianGrid strokeDasharray="3 3" stroke={GRID_COLOR}/>
+                    <XAxis dataKey="name" tick={AXIS_STYLE11}/><YAxis allowDecimals={false} tick={AXIS_STYLE}/>
                     <Tooltip content={<CustomTooltip/>}/><Legend/>
-                    <Bar dataKey="low" stackId="a" fill={C.green} name="Low"/>
-                    <Bar dataKey="medium" stackId="a" fill={C.orange} name="Medium"/>
-                    <Bar dataKey="critical" stackId="a" fill={C.red} name="Critical" radius={[4,4,0,0]}/>
+                    <Bar dataKey="low" stackId="a" fill={C.green} name="Low" isAnimationActive={false}/>
+                    <Bar dataKey="medium" stackId="a" fill={C.orange} name="Medium" isAnimationActive={false}/>
+                    <Bar dataKey="critical" stackId="a" fill={C.red} name="Critical" radius={[4,4,0,0]} isAnimationActive={false}/>
                   </BarChart>
                 </ResponsiveContainer>
               </div>
               <div className="re-chart-card">
                 <div className="re-chart-title">Avg Score by Shipping Line</div>
                 <ResponsiveContainer width="100%" height={280}>
-                  <BarChart data={byShipping.slice(0,10)}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(150,150,150,0.15)"/>
-                    <XAxis dataKey="name" tick={{fontSize:9}} interval={0} angle={-30} textAnchor="end" height={50}/>
-                    <YAxis domain={[0,100]} tick={{fontSize:10}}/>
+                  <BarChart data={geoData.byShipping.slice(0,10)}>
+                    <CartesianGrid strokeDasharray="3 3" stroke={GRID_COLOR}/>
+                    <XAxis dataKey="name" tick={AXIS_STYLE9} interval={0} angle={-30} textAnchor="end" height={50}/>
+                    <YAxis domain={[0,100]} tick={AXIS_STYLE}/>
                     <Tooltip content={<CustomTooltip/>}/>
-                    <Bar dataKey="avg" radius={[4,4,0,0]} name="Avg Score">{byShipping.slice(0,10).map((d,i)=>(<Cell key={i} fill={MULTI[(i+5)%MULTI.length]}/>))}</Bar>
+                    <Bar dataKey="avg" radius={[4,4,0,0]} name="Avg Score" isAnimationActive={false}>{geoData.byShipping.slice(0,10).map((d,i)=>(<Cell key={i} fill={MULTI[(i+5)%MULTI.length]}/>))}</Bar>
                   </BarChart>
                 </ResponsiveContainer>
               </div>
               <div className="re-chart-card full">
                 <div className="re-chart-title">Risk Breakdown by Destination Country</div>
                 <ResponsiveContainer width="100%" height={280}>
-                  <BarChart data={byCountry.slice(0,15)}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(150,150,150,0.15)"/>
-                    <XAxis dataKey="name" tick={{fontSize:10}} interval={0}/>
-                    <YAxis allowDecimals={false} tick={{fontSize:10}}/>
+                  <BarChart data={geoData.byCountry.slice(0,15)}>
+                    <CartesianGrid strokeDasharray="3 3" stroke={GRID_COLOR}/>
+                    <XAxis dataKey="name" tick={AXIS_STYLE} interval={0}/>
+                    <YAxis allowDecimals={false} tick={AXIS_STYLE}/>
                     <Tooltip content={<CustomTooltip/>}/><Legend/>
-                    <Bar dataKey="low" stackId="a" fill={C.green} name="Low"/>
-                    <Bar dataKey="medium" stackId="a" fill={C.orange} name="Medium"/>
-                    <Bar dataKey="critical" stackId="a" fill={C.red} name="Critical" radius={[4,4,0,0]}/>
+                    <Bar dataKey="low" stackId="a" fill={C.green} name="Low" isAnimationActive={false}/>
+                    <Bar dataKey="medium" stackId="a" fill={C.orange} name="Medium" isAnimationActive={false}/>
+                    <Bar dataKey="critical" stackId="a" fill={C.red} name="Critical" radius={[4,4,0,0]} isAnimationActive={false}/>
                   </BarChart>
                 </ResponsiveContainer>
               </div>
@@ -499,51 +588,51 @@ export default function RiskCharts({ results, inputRows }) {
           {activeTab === "weight" && (
             <div className="re-charts-grid">
               <div className="re-chart-card">
-                <div className="re-chart-title">Declared Value vs Weight</div>
+                <div className="re-chart-title">Declared Value vs Weight {results.length > MAX_SCATTER && <span style={{fontSize:11,opacity:0.6}}>(All high-risk + sample, {MAX_SCATTER} shown)</span>}</div>
                 <ResponsiveContainer width="100%" height={300}>
                   <ScatterChart>
-                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(150,150,150,0.15)"/>
-                    <XAxis dataKey="weight" name="Weight" tick={{fontSize:10}}/>
-                    <YAxis dataKey="value" name="Value" tick={{fontSize:10}}/>
+                    <CartesianGrid strokeDasharray="3 3" stroke={GRID_COLOR}/>
+                    <XAxis dataKey="weight" name="Weight" tick={AXIS_STYLE}/>
+                    <YAxis dataKey="value" name="Value" tick={AXIS_STYLE}/>
                     <Tooltip cursor={{strokeDasharray:"3 3"}} content={<CustomTooltip/>}/>
-                    <Scatter data={scatterData} name="Containers">{scatterData.map((d,i)=>(<Cell key={i} fill={d.fill}/>))}</Scatter>
+                    <Scatter data={weightData.scatterData} name="Containers" isAnimationActive={false}>{weightData.scatterData.map((d,i)=>(<Cell key={i} fill={d.fill}/>))}</Scatter>
                   </ScatterChart>
                 </ResponsiveContainer>
               </div>
               <div className="re-chart-card">
-                <div className="re-chart-title">Dwell Time vs Risk Score</div>
+                <div className="re-chart-title">Dwell Time vs Risk Score {results.length > MAX_SCATTER && <span style={{fontSize:11,opacity:0.6}}>(All high-risk + sample, {MAX_SCATTER} shown)</span>}</div>
                 <ResponsiveContainer width="100%" height={300}>
                   <ScatterChart>
-                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(150,150,150,0.15)"/>
-                    <XAxis dataKey="dwell" name="Dwell (hrs)" tick={{fontSize:10}}/>
-                    <YAxis dataKey="score" name="Risk Score" domain={[0,100]} tick={{fontSize:10}}/>
+                    <CartesianGrid strokeDasharray="3 3" stroke={GRID_COLOR}/>
+                    <XAxis dataKey="dwell" name="Dwell (hrs)" tick={AXIS_STYLE}/>
+                    <YAxis dataKey="score" name="Risk Score" domain={[0,100]} tick={AXIS_STYLE}/>
                     <Tooltip cursor={{strokeDasharray:"3 3"}} content={<CustomTooltip/>}/>
-                    <Scatter data={dwellVsRisk} name="Containers">{dwellVsRisk.map((d,i)=>(<Cell key={i} fill={d.fill}/>))}</Scatter>
+                    <Scatter data={weightData.dwellVsRisk} name="Containers" isAnimationActive={false}>{weightData.dwellVsRisk.map((d,i)=>(<Cell key={i} fill={d.fill}/>))}</Scatter>
                   </ScatterChart>
                 </ResponsiveContainer>
               </div>
               <div className="re-chart-card full">
-                <div className="re-chart-title">Weight Discrepancy (Measured − Declared) per Container</div>
+                <div className="re-chart-title">Weight Discrepancy (Measured − Declared) per Container {results.length > MAX_BARS && <span style={{fontSize:11,opacity:0.6}}>(Top {MAX_BARS} worst anomalies of {results.length})</span>}</div>
                 <ResponsiveContainer width="100%" height={280}>
-                  <BarChart data={weightDiscrep}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(150,150,150,0.15)"/>
-                    <XAxis dataKey="id" tick={{fontSize:9}} interval={0} angle={-40} textAnchor="end" height={55}/>
-                    <YAxis tick={{fontSize:10}}/>
+                  <BarChart data={weightData.weightDiscrep}>
+                    <CartesianGrid strokeDasharray="3 3" stroke={GRID_COLOR}/>
+                    <XAxis dataKey="id" tick={AXIS_STYLE9} interval={0} angle={-40} textAnchor="end" height={55}/>
+                    <YAxis tick={AXIS_STYLE}/>
                     <Tooltip content={<CustomTooltip/>}/>
-                    <Bar dataKey="diff" radius={[4,4,0,0]} name="Difference">{weightDiscrep.map((d,i)=>(<Cell key={i} fill={d.fill}/>))}</Bar>
+                    <Bar dataKey="diff" radius={[4,4,0,0]} name="Difference" isAnimationActive={false}>{weightData.weightDiscrep.map((d,i)=>(<Cell key={i} fill={d.fill}/>))}</Bar>
                   </BarChart>
                 </ResponsiveContainer>
               </div>
               <div className="re-chart-card full">
                 <div className="re-chart-title">Declared vs Measured Weight</div>
                 <ResponsiveContainer width="100%" height={280}>
-                  <BarChart data={weightDiscrep}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(150,150,150,0.15)"/>
-                    <XAxis dataKey="id" tick={{fontSize:9}} interval={0} angle={-40} textAnchor="end" height={55}/>
-                    <YAxis tick={{fontSize:10}}/>
+                  <BarChart data={weightData.weightDiscrep}>
+                    <CartesianGrid strokeDasharray="3 3" stroke={GRID_COLOR}/>
+                    <XAxis dataKey="id" tick={AXIS_STYLE9} interval={0} angle={-40} textAnchor="end" height={55}/>
+                    <YAxis tick={AXIS_STYLE}/>
                     <Tooltip content={<CustomTooltip/>}/><Legend/>
-                    <Bar dataKey="declared" fill={C.cyan} name="Declared" radius={[4,4,0,0]}/>
-                    <Bar dataKey="measured" fill={C.amber} name="Measured" radius={[4,4,0,0]}/>
+                    <Bar dataKey="declared" fill={C.sky} name="Declared" radius={[4,4,0,0]} isAnimationActive={false}/>
+                    <Bar dataKey="measured" fill={C.violet} name="Measured" radius={[4,4,0,0]} isAnimationActive={false}/>
                   </BarChart>
                 </ResponsiveContainer>
               </div>
@@ -554,52 +643,52 @@ export default function RiskCharts({ results, inputRows }) {
           {activeTab === "deep" && (
             <div className="re-charts-grid">
               <div className="re-chart-card">
-                <div className="re-chart-title">Declared Value vs Risk Score</div>
+                <div className="re-chart-title">Declared Value vs Risk Score {results.length > MAX_SCATTER && <span style={{fontSize:11,opacity:0.6}}>(All high-risk + sample, {MAX_SCATTER} shown)</span>}</div>
                 <ResponsiveContainer width="100%" height={300}>
                   <ScatterChart>
-                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(150,150,150,0.15)"/>
-                    <XAxis dataKey="value" name="Value" tick={{fontSize:10}}/>
-                    <YAxis dataKey="score" name="Risk Score" domain={[0,100]} tick={{fontSize:10}}/>
+                    <CartesianGrid strokeDasharray="3 3" stroke={GRID_COLOR}/>
+                    <XAxis dataKey="value" name="Value" tick={AXIS_STYLE}/>
+                    <YAxis dataKey="score" name="Risk Score" domain={[0,100]} tick={AXIS_STYLE}/>
                     <Tooltip cursor={{strokeDasharray:"3 3"}} content={<CustomTooltip/>}/>
-                    <Scatter data={valueVsRisk} name="Containers">{valueVsRisk.map((d,i)=>(<Cell key={i} fill={d.fill}/>))}</Scatter>
+                    <Scatter data={deepData.valueVsRisk} name="Containers" isAnimationActive={false}>{deepData.valueVsRisk.map((d,i)=>(<Cell key={i} fill={d.fill}/>))}</Scatter>
                   </ScatterChart>
                 </ResponsiveContainer>
               </div>
               <div className="re-chart-card">
                 <div className="re-chart-title">Avg Score by HS Code Category</div>
                 <ResponsiveContainer width="100%" height={300}>
-                  <BarChart data={hsData}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(150,150,150,0.15)"/>
-                    <XAxis dataKey="name" tick={{fontSize:9}} interval={0} angle={-35} textAnchor="end" height={50}/>
-                    <YAxis domain={[0,100]} tick={{fontSize:10}}/>
+                  <BarChart data={deepData.hsData}>
+                    <CartesianGrid strokeDasharray="3 3" stroke={GRID_COLOR}/>
+                    <XAxis dataKey="name" tick={AXIS_STYLE9} interval={0} angle={-35} textAnchor="end" height={50}/>
+                    <YAxis domain={[0,100]} tick={AXIS_STYLE}/>
                     <Tooltip content={<CustomTooltip/>}/>
-                    <Bar dataKey="avg" radius={[4,4,0,0]} name="Avg Score">{hsData.map((d,i)=>(<Cell key={i} fill={MULTI[(i+2)%MULTI.length]}/>))}</Bar>
+                    <Bar dataKey="avg" radius={[4,4,0,0]} name="Avg Score" isAnimationActive={false}>{deepData.hsData.map((d,i)=>(<Cell key={i} fill={MULTI[(i+2)%MULTI.length]}/>))}</Bar>
                   </BarChart>
                 </ResponsiveContainer>
               </div>
               <div className="re-chart-card full">
-                <div className="re-chart-title">Risk Score & Dwell Time per Container</div>
+                <div className="re-chart-title">Risk Score & Dwell Time per Container {results.length > MAX_BARS && <span style={{fontSize:11,opacity:0.6}}>(Top {MAX_BARS} highest risk of {results.length})</span>}</div>
                 <ResponsiveContainer width="100%" height={300}>
-                  <ComposedChart data={results.map((r,i)=>({id:String(r.Container_ID).slice(-6),score:Number(r.Risk_Score)||0,dwell:Number((inputRows[i]||[])[IDX.DWELL])||0}))}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(150,150,150,0.15)"/>
-                    <XAxis dataKey="id" tick={{fontSize:9}} interval={0} angle={-40} textAnchor="end" height={55}/>
-                    <YAxis yAxisId="left" domain={[0,100]} tick={{fontSize:10}} label={{value:"Risk Score",angle:-90,position:"insideLeft",fontSize:10,fill:C.indigo}}/>
-                    <YAxis yAxisId="right" orientation="right" tick={{fontSize:10}} label={{value:"Dwell (hrs)",angle:90,position:"insideRight",fontSize:10,fill:C.amber}}/>
+                  <ComposedChart data={deepData.composedData}>
+                    <CartesianGrid strokeDasharray="3 3" stroke={GRID_COLOR}/>
+                    <XAxis dataKey="id" tick={AXIS_STYLE9} interval={0} angle={-40} textAnchor="end" height={55}/>
+                    <YAxis yAxisId="left" domain={[0,100]} tick={AXIS_STYLE} label={{value:"Risk Score",angle:-90,position:"insideLeft",fontSize:10,fill:C.indigo}}/>
+                    <YAxis yAxisId="right" orientation="right" tick={AXIS_STYLE} label={{value:"Dwell (hrs)",angle:90,position:"insideRight",fontSize:10,fill:C.amber}}/>
                     <Tooltip content={<CustomTooltip/>}/><Legend/>
-                    <Bar yAxisId="left" dataKey="score" fill={`${C.indigo}60`} name="Risk Score" radius={[4,4,0,0]}/>
-                    <Line yAxisId="right" type="monotone" dataKey="dwell" stroke={C.amber} strokeWidth={2.5} dot={{r:3,fill:C.amber}} name="Dwell Time"/>
+                    <Bar yAxisId="left" dataKey="score" fill={`${C.indigo}55`} name="Risk Score" radius={[4,4,0,0]} isAnimationActive={false}/>
+                    <Line yAxisId="right" type="monotone" dataKey="dwell" stroke={C.amber} strokeWidth={2.5} dot={false} name="Dwell Time" isAnimationActive={false}/>
                   </ComposedChart>
                 </ResponsiveContainer>
               </div>
               <div className="re-chart-card full">
-                <div className="re-chart-title">Weight Discrepancy % per Container</div>
+                <div className="re-chart-title">Weight Discrepancy % per Container {results.length > MAX_BARS && <span style={{fontSize:11,opacity:0.6}}>(Top {MAX_BARS} worst anomalies of {results.length})</span>}</div>
                 <ResponsiveContainer width="100%" height={280}>
-                  <BarChart data={weightDiscrep}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(150,150,150,0.15)"/>
-                    <XAxis dataKey="id" tick={{fontSize:9}} interval={0} angle={-40} textAnchor="end" height={55}/>
-                    <YAxis tick={{fontSize:10}} tickFormatter={(v)=>`${v}%`}/>
+                  <BarChart data={deepData.weightDiscrep}>
+                    <CartesianGrid strokeDasharray="3 3" stroke={GRID_COLOR}/>
+                    <XAxis dataKey="id" tick={AXIS_STYLE9} interval={0} angle={-40} textAnchor="end" height={55}/>
+                    <YAxis tick={AXIS_STYLE} tickFormatter={(v)=>`${v}%`}/>
                     <Tooltip content={<CustomTooltip/>}/>
-                    <Bar dataKey="pct" radius={[4,4,0,0]} name="Discrepancy %">{weightDiscrep.map((d,i)=>(<Cell key={i} fill={Math.abs(d.pct)>10?C.red:Math.abs(d.pct)>5?C.amber:C.teal}/>))}</Bar>
+                    <Bar dataKey="pct" radius={[4,4,0,0]} name="Discrepancy %" isAnimationActive={false}>{deepData.weightDiscrep.map((d,i)=>(<Cell key={i} fill={Math.abs(d.pct)>10?C.red:Math.abs(d.pct)>5?C.amber:C.teal}/>))}</Bar>
                   </BarChart>
                 </ResponsiveContainer>
               </div>
@@ -611,3 +700,4 @@ export default function RiskCharts({ results, inputRows }) {
     </div>
   );
 }
+
