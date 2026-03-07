@@ -1,19 +1,6 @@
+import { useEffect, useCallback } from "react";
+import { createPortal } from "react-dom";
 import { X } from "lucide-react";
-import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  Cell,
-  RadarChart,
-  Radar,
-  PolarGrid,
-  PolarAngleAxis,
-  PolarRadiusAxis,
-} from "recharts";
 
 function scoreColor(s) {
   if (s >= 70) return "#dc2626";
@@ -28,6 +15,18 @@ function riskClass(level) {
   return "low";
 }
 
+const DRIVER_COLORS = ["#6366f1", "#f59e0b", "#06b6d4", "#ec4899", "#8b5cf6", "#14b8a6"];
+
+function parseDrivers(text) {
+  if (!text) return { main: "--", drivers: [] };
+  const m = text.match(/(?:Top drivers|Primary factors|unusual patterns in)[:\s]*(.+?)\.?\s*$/i);
+  if (!m) return { main: text, drivers: [] };
+  return {
+    main: text.slice(0, m.index).trim(),
+    drivers: m[1].split(/,\s*/).map((d) => d.replace(/^\d+\.\s*/, "").trim()).filter(Boolean),
+  };
+}
+
 export default function RiskDetail({
   rowIndex,
   inputRows,
@@ -35,6 +34,21 @@ export default function RiskDetail({
   results,
   onClose,
 }) {
+  /* ── Close on Escape key ────────────────────────────────────────────── */
+  const handleKey = useCallback((e) => {
+    if (e.key === "Escape") onClose();
+  }, [onClose]);
+
+  useEffect(() => {
+    if (rowIndex == null) return;
+    document.addEventListener("keydown", handleKey);
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.removeEventListener("keydown", handleKey);
+      document.body.style.overflow = "";
+    };
+  }, [rowIndex, handleKey]);
+
   if (rowIndex == null) return null;
 
   const row = inputRows[rowIndex];
@@ -42,126 +56,63 @@ export default function RiskDetail({
   const res = results.find((r) => String(r.Container_ID) === cid) || {};
   const score = Number(res.Risk_Score) || 0;
   const cls = riskClass(res.Risk_Level);
+  const { main: explMain, drivers } = parseDrivers(res.Explanation_Summary);
 
-  const compData = results
-    .map((r) => ({
-      id: String(r.Container_ID).slice(-6),
-      score: Number(r.Risk_Score) || 0,
-      current: String(r.Container_ID) === cid,
-    }))
-    .sort((a, b) => a.score - b.score);
-
-  const numericFields = [
-    { key: "Declared_Value", idx: 10 },
-    { key: "Declared_Weight", idx: 11 },
-    { key: "Measured_Weight", idx: 12 },
-    { key: "Dwell_Time_Hours", idx: 14 },
-  ];
-
-  function normalize(val, idx) {
-    const all = inputRows.map((r) => Number(r[idx]) || 0);
-    const max = Math.max(...all, 1);
-    return ((Number(val) || 0) / max) * 100;
-  }
-
-  const radarData = numericFields.map((f) => ({
-    field: f.key.replace(/_/g, " "),
-    value: normalize(row[f.idx], f.idx),
-    avg:
-      inputRows.reduce((s, r) => s + normalize(r[f.idx], f.idx), 0) /
-      inputRows.length,
-  }));
-
-  return (
+  return createPortal(
     <div className="re-detail-overlay" onClick={onClose}>
       <div className="re-detail-panel" onClick={(e) => e.stopPropagation()}>
+        {/* ── Header ──────────────────────────────────────────────── */}
         <div className="re-detail-header">
           <h2>Container {cid}</h2>
-          <button className="re-detail-close" onClick={onClose}>
-            <X size={20} />
-          </button>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <kbd className="re-esc-hint">ESC</kbd>
+            <button className="re-detail-close" onClick={onClose}>
+              <X size={20} />
+            </button>
+          </div>
         </div>
+
         <div className="re-detail-body">
+          {/* ── Risk summary strip ────────────────────────────────── */}
           <div className="re-detail-risk-bar">
             <div className="score" style={{ color: scoreColor(score) }}>
               {score}
             </div>
             <div className="bar-wrap">
-              <div className="bar-bg">
-                <span
-                  className="bar-fill"
-                  style={{
-                    width: `${Math.min(100, score)}%`,
-                    backgroundColor: scoreColor(score),
-                  }}
-                />
-              </div>
-              <div className="explanation">{res.Explanation_Summary || "--"}</div>
+              <div className="explanation">{explMain}</div>
+              {drivers.length > 0 && (
+                <div className="re-expl-drivers" style={{ marginTop: 6 }}>
+                  {drivers.map((d, i) => (
+                    <span
+                      key={i}
+                      className="re-driver-chip"
+                      style={{
+                        backgroundColor: `${DRIVER_COLORS[i % DRIVER_COLORS.length]}18`,
+                        color: DRIVER_COLORS[i % DRIVER_COLORS.length],
+                        borderColor: `${DRIVER_COLORS[i % DRIVER_COLORS.length]}30`,
+                      }}
+                    >
+                      {d.replace(/_/g, " ")}
+                    </span>
+                  ))}
+                </div>
+              )}
             </div>
             <span className={`re-risk-pill ${cls}`}>{res.Risk_Level || "--"}</span>
           </div>
 
+          {/* ── All input fields ──────────────────────────────────── */}
           <div className="re-detail-grid">
             {inputHeaders.map((h, i) => (
               <div className="re-detail-field" key={h}>
-                <div className="label">{h.replace(/_/g, " ")}</div>
+                <div className="label">{h.replace(/_/g, " ").replace(/\s*\(.*?\)/g, "")}</div>
                 <div className="value">{row[i]}</div>
               </div>
             ))}
           </div>
-
-          <div className="re-charts-grid">
-            <div className="re-chart-card">
-              <div className="re-chart-title">This Container vs All (Score Comparison)</div>
-              <ResponsiveContainer width="100%" height={220}>
-                <BarChart data={compData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(150,150,150,0.15)" />
-                  <XAxis dataKey="id" tick={{ fontSize: 9 }} interval={0} angle={-35} textAnchor="end" height={50} />
-                  <YAxis domain={[0, 100]} tick={{ fontSize: 10 }} />
-                  <Tooltip />
-                  <Bar dataKey="score" radius={[3, 3, 0, 0]}>
-                    {compData.map((d, i) => (
-                      <Cell
-                        key={i}
-                        fill={d.current ? "#6366f1" : "rgba(150,150,150,0.25)"}
-                        stroke={d.current ? "#6366f1" : "none"}
-                        strokeWidth={d.current ? 2 : 0}
-                      />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-
-            <div className="re-chart-card">
-              <div className="re-chart-title">Metric Profile (vs Average)</div>
-              <ResponsiveContainer width="100%" height={220}>
-                <RadarChart data={radarData}>
-                  <PolarGrid stroke="rgba(150,150,150,0.2)" />
-                  <PolarAngleAxis dataKey="field" tick={{ fontSize: 9 }} />
-                  <PolarRadiusAxis tick={{ fontSize: 8 }} domain={[0, 100]} />
-                  <Radar
-                    name="This Container"
-                    dataKey="value"
-                    stroke="#6366f1"
-                    fill="rgba(99,102,241,0.25)"
-                    strokeWidth={2}
-                  />
-                  <Radar
-                    name="Fleet Average"
-                    dataKey="avg"
-                    stroke="#f59e0b"
-                    fill="rgba(245,158,11,0.1)"
-                    strokeWidth={2}
-                    strokeDasharray="4 4"
-                  />
-                  <Tooltip />
-                </RadarChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
