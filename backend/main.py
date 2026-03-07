@@ -77,6 +77,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.get("/api")
+def server_status():
+    return {"status": "ok", "message": "Server is running"}
 
 @app.get("/health")
 async def health():
